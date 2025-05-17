@@ -1,16 +1,22 @@
 const chatService = require('../../services/chatService');
 
-const ROLE_ASSISTANT = 'You are a reflective coach';
+const ROLE_ASSISTANT =
+  'You are a reflective coach. Your primary role is to ask guiding questions and help the user reflect on their own goals and progress. You MUST NOT assign goals, tasks, or suggest specific actions for the user to take. Your responses MUST be broken into distinct parts separated by "[AI_MSG_SEPARATOR]". The final part of your response must always be a question to the user.';
 
 const STAGE_SYSTEM_PROMPTS = {
-  REQUEST_WHY: `${ROLE_ASSISTANT}. User shared their outcome. Ask: 'Why were you able to accomplish this, or why not?' Be direct.`,
-  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT}. User shared their reasons or indicated uncertainty. Briefly acknowledge, then ask: 'What\'s your next goal, and when do you plan to achieve it?' Be direct.`,
-  REQUEST_CONCLUDE: `${ROLE_ASSISTANT}. User shared their next goal and timing. Briefly acknowledge their reflection on why they did/didn't meet their previous goal (drawing from conversation history), then offer a short, supportive, and positive closing statement wishing them well with their *new* goal.`,
-  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT}. Reflection ended. How else can I help?`,
-  GENERAL_GUIDANCE: `${ROLE_ASSISTANT}. Let\'s continue your reflection.`,
-  CLARIFY_OUTCOME: `${ROLE_ASSISTANT}. I'd like to make sure I understand. Were you able to accomplish your previous goal? A 'yes' or 'no', or a bit more detail, would be helpful.`,
-  CLARIFY_WHY: `${ROLE_ASSISTANT}. Just to follow up on your reasons – could you elaborate a bit on why you were (or weren't) able to accomplish your goal? If you're unsure, that's fine too.`,
-  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT}. To ensure I've got it, what's your next goal, and when are you aiming to achieve it?`,
+  REQUEST_WHY: `${ROLE_ASSISTANT} User shared their outcome. Part 1: Briefly acknowledge their outcome. [AI_MSG_SEPARATOR] Part 2: Why were you able to accomplish this, or why not?`,
+  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT} User indicated reasons or uncertainty for the last goal. Part 1: Briefly acknowledge their input. [AI_MSG_SEPARATOR] Part 2: For your next goal, what specific outcome do you want to achieve, and by when?`,
+  REQUEST_CONCLUDE: `${ROLE_ASSISTANT} The user has provided their next goal and timing. Your task now is to CONCLUDE the reflection session.
+Part 1: Briefly acknowledge the user's input regarding their next goal and timing.
+[AI_MSG_SEPARATOR]
+Part 2: Offer an insightful and motivational closing remark. This should be inspired by their stated goal or reflections if possible, and be more meaningful than a generic 'good luck'.
+Your response MUST be a final, positive, and empowering statement.
+ABSOLUTELY DO NOT ASK ANY MORE QUESTIONS. CONCLUDE THE INTERACTION NOW.`,
+  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT} Reflection session concluded. Part 1: Briefly acknowledge the session is over. [AI_MSG_SEPARATOR] Part 2: How else can I help you today?`,
+  GENERAL_GUIDANCE: `${ROLE_ASSISTANT} There seems to be some confusion. Part 1: Let's try to get back on track with your reflection. [AI_MSG_SEPARATOR] Part 2: Where were we, or what were you thinking about regarding your goals?`,
+  CLARIFY_OUTCOME: `${ROLE_ASSISTANT} User's previous response about their goal outcome was unclear. Part 1: I'd like to make sure I understand. [AI_MSG_SEPARATOR] Part 2: Just to clarify, were you able to accomplish your previous goal?`,
+  CLARIFY_WHY: `${ROLE_ASSISTANT} User's previous response about their reasons was unclear. Part 1: Thanks for sharing. To make sure I follow. [AI_MSG_SEPARATOR] Part 2: Could you tell me a bit more about why you were (or weren't) able to accomplish your goal? It's okay if you're not sure.`,
+  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT} User's previous response about their next goal or timing was unclear. Part 1: Okay, let's clarify that. [AI_MSG_SEPARATOR] Part 2: To ensure I've got it, what's your next goal, and when are you aiming to achieve it?`,
 };
 
 const STAGE_KEYS = {
@@ -39,7 +45,7 @@ const STATE_ANALYSIS_SYSTEM_PROMPT = `You are a precise conversation state analy
 
 Based on the history, identify and output ONLY a single, raw, valid JSON object with the following fields:
 - \`outcomeProvided\`: boolean (true if user stated outcome after an initial question)
-- \`whyProvided\`: boolean (true if user provided reasons or explicit uncertainty like "I don't know" after a "why" question)
+- \`whyProvided\`: boolean (true if user provided reasons, explicit uncertainty like "I don't know", or a response that sufficiently addresses the 'why' question, even if brief or vague, allowing the conversation to progress. The goal is not to force deep analysis if the user is not forthcoming.)
 - \`nextGoalProvided\`: boolean (true if user stated the *text* of their next goal. This is true if nextGoalText is not empty, not "not specified", and not just a vague unresolved reference that couldn't be clarified from context.)
 - \`nextGoalText\`: string (The actual text of the user's next goal, e.g., "go to the gym", "finish reading my book". Resolve referential phrases if possible. If not provided, not clear, or unresolvable, use "not specified".)
 - \`nextGoalTimingProvided\`: boolean (true if user specified a timeframe for their next goal. This may be provided in the same utterance as the goal text.)
@@ -487,10 +493,8 @@ function determineNextStepFromAIState(aiState) {
       aiState.nextGoalText &&
       aiState.nextGoalText !== 'not specified'
     ) {
-      instruction = `${ROLE_ASSISTANT}. Understood, the goal is "${aiState.nextGoalText}". And when do you plan to achieve this?`;
+      instruction = `${ROLE_ASSISTANT} Part 1: Understood, the goal is "${aiState.nextGoalText}". [AI_MSG_SEPARATOR] Part 2: And when do you plan to achieve this?`;
     } else {
-      // Fallback: If the last prompt wasn't specifically ASKED_NEXT_GOAL, or if nextGoalText is somehow still not specific,
-      // revert to asking for both clearly.
       instruction = STAGE_SYSTEM_PROMPTS.CLARIFY_NEXT_GOAL_AND_TIMING;
     }
     return {
@@ -522,6 +526,16 @@ exports.handleUserResponse = async (req, res) => {
 
     const priorMessages = chatHistory || [];
 
+    // Clean priorMessages to include only standard OpenAI message fields
+    const cleanPriorMessages = priorMessages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      // Conditionally add other valid OpenAI message fields if they exist on msg
+      ...(msg.name && { name: msg.name }),
+      ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+      ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+    }));
+
     // Step 1: Get AI-analyzed state
     const aiAnalyzedState = await getAIAnalyzedState(priorMessages);
 
@@ -543,46 +557,31 @@ exports.handleUserResponse = async (req, res) => {
     };
 
     if (aiAnalyzedState.error) {
-      let baseRecoveryMessage = `${ROLE_ASSISTANT}. I'm having a bit of trouble keeping track of our conversation. `;
-      if (currentUserMessage && currentUserMessage.content) {
-        baseRecoveryMessage += `You mentioned, "${currentUserMessage.content}". `;
-      }
-      baseRecoveryMessage += 'To help us get back on course: ';
-
+      let baseRecoveryMessage = `${ROLE_ASSISTANT} I'm having a bit of trouble keeping track. You mentioned, "${currentUserMessage.content}".`;
       let guidingQuestion = '';
-      let lastMatchedStage = null;
-
       if (priorMessages && priorMessages.length > 0) {
         const reversedPriorMessages = [...priorMessages].reverse();
         for (const msg of reversedPriorMessages) {
           if (msg.role === 'assistant') {
             if (msg.content.includes('goal for tomorrow?')) {
-              lastMatchedStage = STAGE_KEYS.AWAITING_NEXT_GOAL;
+              guidingQuestion = "What's your next goal, and when do you plan to achieve it?";
               break;
             }
             if (msg.content.includes('Why were you able') || msg.content.includes('why not?')) {
-              lastMatchedStage = STAGE_KEYS.AWAITING_WHY;
+              guidingQuestion =
+                'Could you tell me why you were able to achieve your goal, or why not?';
               break;
             }
             if (msg.content.includes('were you able to do it?')) {
-              lastMatchedStage = STAGE_KEYS.AWAITING_INITIAL_RESPONSE;
+              guidingQuestion =
+                'Could you please share if you were able to accomplish your recent goal?';
               break;
             }
           }
         }
       }
-
-      if (lastMatchedStage === STAGE_KEYS.AWAITING_WHY) {
-        guidingQuestion = 'Could you tell me why you were able to achieve your goal, or why not?';
-      } else if (lastMatchedStage === STAGE_KEYS.AWAITING_NEXT_GOAL) {
-        guidingQuestion = "What's your next goal, and when do you plan to achieve it?";
-      } else {
-        // Includes AWAITING_INITIAL_RESPONSE or null/undefined if no specific match
-        guidingQuestion = 'Could you please share if you were able to accomplish your recent goal?';
-      }
-      systemInstructionForLlm = baseRecoveryMessage + guidingQuestion;
-      // currentStageForResponse is already STAGE_KEYS.ERROR_STATE from determineNextStepFromAIState
-      // collectedInfoForResponse is already the error state (all false) from aiAnalyzedState
+      // Ensure the dynamically constructed error prompt also follows multi-part and ends with a question.
+      systemInstructionForLlm = `${baseRecoveryMessage} [AI_MSG_SEPARATOR] To help us get back on course: ${guidingQuestion}`;
     }
 
     const currentUserIsUncertain = UNCERTAINTY_PHRASES.some((phrase) =>
@@ -598,7 +597,7 @@ exports.handleUserResponse = async (req, res) => {
 
     const historyForLlm = [
       { role: 'system', content: systemInstructionForLlm },
-      ...priorMessages,
+      ...cleanPriorMessages,
       // We don't add currentUserMessage here if chatService.sendMessage expects it as a separate param
     ];
 
@@ -606,6 +605,20 @@ exports.handleUserResponse = async (req, res) => {
     const aiResponse = await chatService.sendMessage(currentUserMessage.content, historyForLlm, {
       model: 'gpt-3.5-turbo',
     });
+
+    // Process AI response for multi-part messages
+    let finalAiMessageContent = '';
+    if (aiResponse && aiResponse.message) {
+      if (typeof aiResponse.message === 'string') {
+        finalAiMessageContent = aiResponse.message;
+      } else if (typeof aiResponse.message.content === 'string') {
+        finalAiMessageContent = aiResponse.message.content;
+      }
+    }
+    const aiMessageArray = finalAiMessageContent
+      .split('[AI_MSG_SEPARATOR]')
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
 
     // Determine final reported stage
     let finalReportedStage = currentStageForResponse;
@@ -642,7 +655,7 @@ exports.handleUserResponse = async (req, res) => {
     }
 
     res.json({
-      aiMessage: aiResponse.message,
+      aiMessage: aiMessageArray.length > 0 ? aiMessageArray : [finalAiMessageContent], // Send as array
       currentStage: finalReportedStage,
       collectedInformation: collectedInfoForResponse,
       nextGoalDisplay: nextGoalDisplayData,
