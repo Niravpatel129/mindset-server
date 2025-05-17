@@ -1,9 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const connectDB = require('./config/db'); // Import DB connection
+
+// Connect to Database
+connectDB();
 
 // Import routes
 const chatRoutes = require('./routes/chatRoutes');
+const userRoutes = require('./routes/userRoutes'); // Import user routes
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -69,6 +74,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/chat', chatRoutes);
+app.use('/api/users', userRoutes); // Use user routes
 
 // Error handling middleware
 app.use(errorHandler);
