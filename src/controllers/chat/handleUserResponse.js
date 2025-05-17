@@ -2,14 +2,6 @@ const chatService = require('../../services/chatService');
 
 const ROLE_ASSISTANT = 'You are a reflective coach';
 
-// Helper functions to identify assistant message content patterns (can be used by AI or fallback logic)
-const isInitialQuery = (text) =>
-  text && text.includes('your goal was') && text.includes('were you able to do it?');
-const isWhyQuery = (text) =>
-  text && (text.includes('Why were you able to accomplish this') || text.includes('why not?'));
-const isNextGoalQuery = (text) => text && text.includes("What's your goal for tomorrow?");
-const isConclusion = (text) => text && text.includes('Good luck.');
-
 const STAGE_SYSTEM_PROMPTS = {
   REQUEST_WHY: `${ROLE_ASSISTANT}. User shared their outcome. Ask: \'Why were you able to accomplish this, or why not?\' Be direct.`,
   REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT}. User shared their reasons or indicated uncertainty. Briefly acknowledge, then ask: \'What\\\'s your goal for tomorrow?\' Be direct.`,
@@ -47,28 +39,30 @@ const STATE_ANALYSIS_SYSTEM_PROMPT = `You are a precise conversation state analy
 async function getAIAnalyzedState(priorChatHistory) {
   try {
     const historyString = JSON.stringify(priorChatHistory);
-    console.log('AI Analysis Input (priorChatHistory String):', historyString);
+    // console.log('AI Analysis Input (priorChatHistory String):', historyString); // Keep for debugging if needed
 
     const analysisResponse = await chatService.sendMessage(
       historyString,
       [{ role: 'system', content: STATE_ANALYSIS_SYSTEM_PROMPT }],
-      { model: 'gpt-3.5-turbo' },
+      { model: 'gpt-3.5-turbo' }, // Ensure this model is optimal for structured JSON output
     );
 
-    console.log('Raw AI Analysis Response object:', JSON.stringify(analysisResponse));
-    console.log('Raw AI Analysis Response content:', analysisResponse?.message?.content);
+    // console.log('Raw AI Analysis Response object:', JSON.stringify(analysisResponse)); // Debugging
+    // console.log('Raw AI Analysis Response content:', analysisResponse?.message?.content); // Debugging
 
-    if (analysisResponse && typeof analysisResponse.message === 'string') {
-      let jsonString = analysisResponse.message.trim();
-      console.log('Trimmed JSON string for parsing:', jsonString);
+    if (
+      analysisResponse &&
+      analysisResponse.message &&
+      typeof analysisResponse.message.content === 'string'
+    ) {
+      let jsonString = analysisResponse.message.content.trim();
       let parsedState;
 
       try {
-        // First, try direct parsing
         parsedState = JSON.parse(jsonString);
       } catch (e) {
-        // If direct parsing fails, try to extract JSON object using regex
-        const jsonMatch = jsonString.match(/\\{.*\\}/s);
+        // console.warn('Direct JSON.parse failed, attempting regex extraction:', e); // Debugging
+        const jsonMatch = jsonString.match(/\{.*\}/s);
         if (jsonMatch && jsonMatch[0]) {
           try {
             parsedState = JSON.parse(jsonMatch[0]);
@@ -76,21 +70,19 @@ async function getAIAnalyzedState(priorChatHistory) {
             console.error(
               'Failed to parse extracted JSON from AI analysis:',
               e2,
-              'Original content:',
-              jsonString,
+              'Original content after regex attempt:',
+              jsonMatch[0],
             );
-            // Fall through to default error state if regex-extracted JSON also fails to parse
           }
         } else {
           console.error(
             'Direct JSON parsing failed and no JSON object found via regex. Content:',
             jsonString,
           );
-          // Fall through to default error state if no JSON object pattern is found
         }
       }
 
-      // Validate the parsed state if parsing was successful
+      // Validate the parsed state
       if (
         parsedState &&
         typeof parsedState.outcomeProvided === 'boolean' &&
@@ -105,18 +97,23 @@ async function getAIAnalyzedState(priorChatHistory) {
       } else if (parsedState) {
         console.error('Parsed JSON from AI analysis did not match expected schema:', parsedState);
       } else {
-        console.error('All parsing attempts failed for AI analysis content.');
+        // This case is hit if all parsing attempts failed (parsedState is undefined)
+        console.error(
+          'All parsing attempts failed for AI analysis content. Original string:',
+          jsonString,
+        );
       }
     } else {
       console.error(
-        'No valid string content received in analysisResponse.message for AI state analysis. Full response:',
+        'No valid string content received in analysisResponse.message.content for AI state analysis. Full response:',
         JSON.stringify(analysisResponse),
       );
     }
   } catch (error) {
-    console.error('Error in getAIAnalyzedState:', error);
+    console.error('Error in getAIAnalyzedState function:', error);
   }
-  // Fallback to a default/error state if AI analysis fails
+
+  // Fallback to a default/error state
   return {
     outcomeProvided: false,
     whyProvided: false,
@@ -134,15 +131,16 @@ function determineNextStepFromAIState(aiState) {
     nextGoalProvided,
     conversationConcluded,
     lastSignificantAssistantPromptType,
+    error: aiAnalysisFailed, // Renamed for clarity within this function
   } = aiState;
+
   const collectedInfo = { outcomeProvided, whyProvided, nextGoalProvided };
 
-  if (aiState.error) {
-    // If AI state analysis failed
+  if (aiAnalysisFailed) {
     return {
-      systemInstructionText: STAGE_SYSTEM_PROMPTS.GENERAL_GUIDANCE, // Or a specific error handling prompt
+      systemInstructionText: STAGE_SYSTEM_PROMPTS.GENERAL_GUIDANCE,
       currentStage: STAGE_KEYS.ERROR_STATE,
-      collectedInfo,
+      collectedInfo, // Reflects potentially incomplete info due to error
       lastSignificantAssistantPromptType,
     };
   }
@@ -151,43 +149,55 @@ function determineNextStepFromAIState(aiState) {
     return {
       systemInstructionText: STAGE_SYSTEM_PROMPTS.POST_CONCLUSION_DEFAULT,
       currentStage: STAGE_KEYS.CONCLUDED,
-      collectedInfo,
+      collectedInfo, // Reflects info gathered before conclusion
       lastSignificantAssistantPromptType,
     };
   }
 
+  // If outcome is not provided, the AI should have asked for it, and now we ask for 'why'
+  // This implies the initial question about the outcome was the last significant prompt.
   if (!outcomeProvided) {
+    // This state implies that the initial question was asked, user responded,
+    // and now we need to ask 'why'.
+    // However, the prompt should be to ask for 'why', not to re-ask initial.
+    // The logic here might need to align with how `lastSignificantAssistantPromptType` influences prompts.
+    // For now, assuming outcome is the first thing needed if not present.
+    // A more robust logic might be: if lastSignificantAssistantPromptType was ASKED_INITIAL and outcome still not provided, there's a mismatch.
+    // But given the AI analysis should tell us outcomeProvided, this path should ideally transition to asking WHY.
     return {
-      systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_WHY, // AI should ask Why after outcome
-      currentStage: STAGE_KEYS.AWAITING_WHY,
+      systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_WHY,
+      currentStage: STAGE_KEYS.AWAITING_WHY, // Correctly moves to AWAITING_WHY
       collectedInfo,
-      lastSignificantAssistantPromptType,
+      lastSignificantAssistantPromptType, // This would be ASKED_INITIAL from AI analysis
     };
   }
 
+  // If outcome is provided, but 'why' is not.
   if (!whyProvided) {
     return {
       systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_WHY,
       currentStage: STAGE_KEYS.AWAITING_WHY,
       collectedInfo,
-      lastSignificantAssistantPromptType,
+      lastSignificantAssistantPromptType, // Could be ASKED_INITIAL or ASKED_WHY if re-prompting
     };
   }
 
+  // If outcome and 'why' are provided, but 'next goal' is not.
   if (!nextGoalProvided) {
     return {
       systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_NEXT_GOAL,
       currentStage: STAGE_KEYS.AWAITING_NEXT_GOAL,
       collectedInfo,
-      lastSignificantAssistantPromptType,
+      lastSignificantAssistantPromptType, // Could be ASKED_WHY or ASKED_NEXT_GOAL
     };
   }
 
+  // All information collected, request conclusion.
   return {
     systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_CONCLUDE,
     currentStage: STAGE_KEYS.AWAITING_CONCLUSION,
     collectedInfo,
-    lastSignificantAssistantPromptType,
+    lastSignificantAssistantPromptType, // Could be ASKED_NEXT_GOAL
   };
 }
 
@@ -242,15 +252,18 @@ exports.handleUserResponse = async (req, res) => {
       model: 'gpt-3.5-turbo',
     });
 
+    // Determine final reported stage
     let finalReportedStage = currentStageForResponse;
     if (
       systemInstructionForLlm === STAGE_SYSTEM_PROMPTS.REQUEST_CONCLUDE &&
-      isConclusion(aiResponse.message.content)
+      aiResponse.message &&
+      aiResponse.message.content &&
+      aiResponse.message.content.includes('Good luck.') // Check if AI did conclude
     ) {
       finalReportedStage = STAGE_KEYS.CONCLUDED;
-      // Update collectedInfo if the AI successfully concludes as instructed
-      // This part might need refinement based on how `collectedInfoForResponse` should reflect the *final* state after AI's concluding message.
-      // For now, `collectedInfoForResponse` reflects the state *before* this final conclusion.
+      // collectedInfoForResponse reflects the state *before* this final conclusion message from AI.
+      // If we needed to update collectedInfo to reflect that conclusion *happened*,
+      // we might set something like `allGoalsMet: true` here, but current structure is fine.
     }
 
     res.json({
