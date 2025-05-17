@@ -45,7 +45,7 @@ const STATE_ANALYSIS_SYSTEM_PROMPT = `You are a precise conversation state analy
 
 Based on the history, identify and output ONLY a single, raw, valid JSON object with the following fields:
 - \`outcomeProvided\`: boolean (true if user stated outcome after an initial question)
-- \`whyProvided\`: boolean (true if user provided reasons, explicit uncertainty like "I don't know", or a response that sufficiently addresses the 'why' question, even if brief or vague, allowing the conversation to progress. The goal is not to force deep analysis if the user is not forthcoming.)
+- \`whyProvided\`: boolean (true if user provided reasons, explicit uncertainty like "I don't know", or a response that sufficiently addresses the 'why' question, even if brief or vague, allowing the conversation to progress. The goal is not to force deep analysis if the user is not forthcoming. For example, if the assistant asks "Why were you able/unable..." and the user responds "I'm not sure" or "I don't know", whyProvided should be true.)
 - \`nextGoalProvided\`: boolean (true if user stated the *text* of their next goal. This is true if nextGoalText is not empty, not "not specified", and not just a vague unresolved reference that couldn't be clarified from context.)
 - \`nextGoalText\`: string (The actual text of the user's next goal, e.g., "go to the gym", "finish reading my book". Resolve referential phrases if possible. If not provided, not clear, or unresolvable, use "not specified".)
 - \`nextGoalTimingProvided\`: boolean (true if user specified a timeframe for their next goal. This may be provided in the same utterance as the goal text.)
@@ -132,7 +132,6 @@ Example Output: {"isoCheckInDateTime": "2023-10-28T09:00:00Z", "descriptiveCheck
 async function getAIAnalyzedState(priorChatHistory) {
   try {
     const historyString = JSON.stringify(priorChatHistory);
-    // console.log('AI Analysis Input (priorChatHistory String):', historyString); // Keep for debugging if needed
 
     const analysisResponse = await chatService.sendMessage(
       historyString,
@@ -140,16 +139,12 @@ async function getAIAnalyzedState(priorChatHistory) {
       { model: 'gpt-3.5-turbo' }, // Ensure this model is optimal for structured JSON output
     );
 
-    // console.log('Raw AI Analysis Response object:', JSON.stringify(analysisResponse)); // Debugging
-
     let stringToParse = null;
     if (analysisResponse && analysisResponse.message) {
       if (typeof analysisResponse.message === 'string') {
         stringToParse = analysisResponse.message;
-        // console.log('Attempting to parse from analysisResponse.message (direct string):', stringToParse);
       } else if (typeof analysisResponse.message.content === 'string') {
         stringToParse = analysisResponse.message.content;
-        // console.log('Attempting to parse from analysisResponse.message.content:', stringToParse);
       }
     }
 
@@ -160,7 +155,6 @@ async function getAIAnalyzedState(priorChatHistory) {
       try {
         parsedState = JSON.parse(jsonString);
       } catch (e) {
-        // console.warn('Direct JSON.parse failed, attempting regex extraction:', e, 'Original string:', jsonString); // Debugging
         const jsonMatch = jsonString.match(/\{.*\}/s);
         if (jsonMatch && jsonMatch[0]) {
           try {
@@ -303,15 +297,11 @@ async function getCheckInDetails(goalDisplayData) {
       currentIsoDateTime,
     });
 
-    console.log('Sending to getCheckInDetails AI:', inputForReminderAI); // For debugging input
-
     const reminderResponse = await chatService.sendMessage(
       inputForReminderAI,
       [{ role: 'system', content: REMINDER_SPEC_SYSTEM_PROMPT }],
       { model: 'gpt-3.5-turbo' },
     );
-
-    console.log('Raw response from getCheckInDetails AI:', JSON.stringify(reminderResponse)); // For debugging raw response
 
     let stringToParse = null;
     if (reminderResponse && reminderResponse.message) {
@@ -352,7 +342,6 @@ async function getCheckInDetails(goalDisplayData) {
           if (
             /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(parsedData.isoCheckInDateTime)
           ) {
-            console.log('getCheckInDetails successful. Returning:', JSON.stringify(parsedData)); // Added success log
             return {
               isoCheckInDateTime: parsedData.isoCheckInDateTime,
               descriptiveCheckIn: parsedData.descriptiveCheckIn,
