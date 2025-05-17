@@ -48,37 +48,47 @@ async function getAIAnalyzedState(priorChatHistory) {
     );
 
     // console.log('Raw AI Analysis Response object:', JSON.stringify(analysisResponse)); // Debugging
-    // console.log('Raw AI Analysis Response content:', analysisResponse?.message?.content); // Debugging
 
-    if (
-      analysisResponse &&
-      analysisResponse.message &&
-      typeof analysisResponse.message.content === 'string'
-    ) {
-      let jsonString = analysisResponse.message.content.trim();
+    let stringToParse = null;
+    if (analysisResponse && analysisResponse.message) {
+      if (typeof analysisResponse.message === 'string') {
+        stringToParse = analysisResponse.message;
+        // console.log('Attempting to parse from analysisResponse.message (direct string):', stringToParse);
+      } else if (typeof analysisResponse.message.content === 'string') {
+        stringToParse = analysisResponse.message.content;
+        // console.log('Attempting to parse from analysisResponse.message.content:', stringToParse);
+      }
+    }
+
+    if (stringToParse) {
+      let jsonString = stringToParse.trim();
       let parsedState;
 
       try {
         parsedState = JSON.parse(jsonString);
       } catch (e) {
-        // console.warn('Direct JSON.parse failed, attempting regex extraction:', e); // Debugging
+        // console.warn('Direct JSON.parse failed, attempting regex extraction:', e, 'Original string:', jsonString); // Debugging
         const jsonMatch = jsonString.match(/\{.*\}/s);
         if (jsonMatch && jsonMatch[0]) {
           try {
             parsedState = JSON.parse(jsonMatch[0]);
           } catch (e2) {
             console.error(
-              'Failed to parse extracted JSON from AI analysis:',
+              'Failed to parse extracted JSON from AI analysis (after regex):',
               e2,
               'Original content after regex attempt:',
               jsonMatch[0],
+              'Original string fed to regex:',
+              jsonString,
             );
+            // parsedState remains undefined
           }
         } else {
           console.error(
-            'Direct JSON parsing failed and no JSON object found via regex. Content:',
+            'Direct JSON parsing failed and no JSON object found via regex. Original string:',
             jsonString,
           );
+          // parsedState remains undefined
         }
       }
 
@@ -93,24 +103,29 @@ async function getAIAnalyzedState(priorChatHistory) {
           parsedState.lastSignificantAssistantPromptType,
         )
       ) {
-        return parsedState;
+        return parsedState; // Successful parse and validation
       } else if (parsedState) {
-        console.error('Parsed JSON from AI analysis did not match expected schema:', parsedState);
-      } else {
-        // This case is hit if all parsing attempts failed (parsedState is undefined)
+        // Parsed something, but it didn't match the schema
         console.error(
-          'All parsing attempts failed for AI analysis content. Original string:',
+          'Parsed JSON from AI analysis did not match expected schema:',
+          parsedState,
+          'Original string:',
           jsonString,
         );
+      } else {
+        // This case is hit if all parsing attempts failed (parsedState is undefined)
+        // Specific errors logged above.
       }
     } else {
+      // stringToParse was null
       console.error(
-        'No valid string content received in analysisResponse.message.content for AI state analysis. Full response:',
+        'No extractable string content found in AI analysis response for JSON parsing. Full response:',
         JSON.stringify(analysisResponse),
       );
     }
   } catch (error) {
-    console.error('Error in getAIAnalyzedState function:', error);
+    // Catch errors from chatService.sendMessage or other unexpected issues
+    console.error('Error in getAIAnalyzedState function (outer try-catch):', error);
   }
 
   // Fallback to a default/error state
@@ -223,12 +238,55 @@ exports.handleUserResponse = async (req, res) => {
 
     let systemInstructionForLlm = derivedStepInfo.systemInstructionText;
     let currentStageForResponse = derivedStepInfo.currentStage;
-    // Use the collectedInfo as determined by the AI analysis
+    // Use the collectedInfo as determined by the AI analysis (or its error fallback)
     let collectedInfoForResponse = {
       outcomeProvided: aiAnalyzedState.outcomeProvided,
       whyProvided: aiAnalyzedState.whyProvided,
       nextGoalProvided: aiAnalyzedState.nextGoalProvided,
     };
+
+    if (aiAnalyzedState.error) {
+      let baseRecoveryMessage = `${ROLE_ASSISTANT}. I'm having a bit of trouble keeping track of our conversation. `;
+      if (currentUserMessage && currentUserMessage.content) {
+        baseRecoveryMessage += `You mentioned, "${currentUserMessage.content}". `;
+      }
+      baseRecoveryMessage += 'To help us get back on course: ';
+
+      let guidingQuestion = '';
+      let lastMatchedStage = null;
+
+      if (priorMessages && priorMessages.length > 0) {
+        const reversedPriorMessages = [...priorMessages].reverse();
+        for (const msg of reversedPriorMessages) {
+          if (msg.role === 'assistant') {
+            if (msg.content.includes('goal for tomorrow?')) {
+              lastMatchedStage = STAGE_KEYS.AWAITING_NEXT_GOAL;
+              break;
+            }
+            if (msg.content.includes('Why were you able') || msg.content.includes('why not?')) {
+              lastMatchedStage = STAGE_KEYS.AWAITING_WHY;
+              break;
+            }
+            if (msg.content.includes('were you able to do it?')) {
+              lastMatchedStage = STAGE_KEYS.AWAITING_INITIAL_RESPONSE;
+              break;
+            }
+          }
+        }
+      }
+
+      if (lastMatchedStage === STAGE_KEYS.AWAITING_WHY) {
+        guidingQuestion = 'Could you tell me why you were able to achieve your goal, or why not?';
+      } else if (lastMatchedStage === STAGE_KEYS.AWAITING_NEXT_GOAL) {
+        guidingQuestion = "What's your goal for tomorrow?";
+      } else {
+        // Includes AWAITING_INITIAL_RESPONSE or null/undefined if no specific match
+        guidingQuestion = 'Could you please share if you were able to accomplish your recent goal?';
+      }
+      systemInstructionForLlm = baseRecoveryMessage + guidingQuestion;
+      // currentStageForResponse is already STAGE_KEYS.ERROR_STATE from determineNextStepFromAIState
+      // collectedInfoForResponse is already the error state (all false) from aiAnalyzedState
+    }
 
     const currentUserIsUncertain = UNCERTAINTY_PHRASES.some((phrase) =>
       currentUserMessage.content.toLowerCase().includes(phrase),
