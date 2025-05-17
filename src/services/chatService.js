@@ -26,10 +26,19 @@ class ChatService {
     }
   }
 
-  async sendMessage(message, options = {}) {
+  async sendMessage(message, chatHistory = [], options = {}) {
     try {
+      const messagesToSend = [...chatHistory];
+      if (message) {
+        messagesToSend.push({ role: 'user', content: message });
+      }
+
+      if (messagesToSend.length === 0) {
+        if (!message) throw new Error('No message content to send.');
+      }
+
       const completion = await this.openai.chat.completions.create({
-        messages: [{ role: 'user', content: message }],
+        messages: messagesToSend,
         model: options.model || 'gpt-3.5-turbo',
         temperature: options.temperature || 0.7,
         max_tokens: options.maxTokens || 150,
