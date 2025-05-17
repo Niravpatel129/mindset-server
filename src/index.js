@@ -11,11 +11,6 @@ const port = process.env.PORT || 3005;
 
 // Debug middleware to log incoming requests
 app.use((req, res, next) => {
-  console.log('\n=== Incoming Request Details ===');
-  console.log('Origin:', req.headers.origin);
-  console.log('Method:', req.method);
-  console.log('Path:', req.path);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   next();
 });
 
