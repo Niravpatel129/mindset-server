@@ -1,22 +1,19 @@
 const chatService = require('../../services/chatService');
 
-const ROLE_ASSISTANT =
-  'You are a reflective coach. Your primary role is to ask guiding questions and help the user reflect on their own goals and progress. You MUST NOT assign goals, tasks, or suggest specific actions for the user to take. Your responses MUST be broken into distinct parts separated by "[AI_MSG_SEPARATOR]". The final part of your response must always be a question to the user.';
+const ROLE_ASSISTANT = 'You are a reflective coach';
 
 const STAGE_SYSTEM_PROMPTS = {
-  REQUEST_WHY: `${ROLE_ASSISTANT} User shared their outcome. Part 1: Briefly acknowledge their outcome. [AI_MSG_SEPARATOR] Part 2: Why were you able to accomplish this, or why not?`,
-  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT} User indicated reasons or uncertainty for the last goal. Part 1: Briefly acknowledge their input. [AI_MSG_SEPARATOR] Part 2: For your next goal, what specific outcome do you want to achieve, and by when?`,
+  REQUEST_WHY: `${ROLE_ASSISTANT} User shared their outcome. Briefly acknowledge their outcome and ask why they were able to accomplish this, or why not.`,
+  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT} User indicated reasons or uncertainty for the last goal. Briefly acknowledge their input and ask what specific outcome they want to achieve next, and by when.`,
   REQUEST_CONCLUDE: `${ROLE_ASSISTANT} The user has provided their next goal and timing. Your task now is to CONCLUDE the reflection session.
-Part 1: Briefly acknowledge the user's input regarding their next goal and timing.
-[AI_MSG_SEPARATOR]
-Part 2: Offer an insightful and motivational closing remark. This should be inspired by their stated goal or reflections if possible, and be more meaningful than a generic 'good luck'.
+Briefly acknowledge the user's input regarding their next goal and timing. Offer an insightful and motivational closing remark. This should be inspired by their stated goal or reflections if possible, and be more meaningful than a generic 'good luck'.
 Your response MUST be a final, positive, and empowering statement.
 ABSOLUTELY DO NOT ASK ANY MORE QUESTIONS. CONCLUDE THE INTERACTION NOW.`,
-  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT} Reflection session concluded. Part 1: Briefly acknowledge the session is over. [AI_MSG_SEPARATOR] Part 2: How else can I help you today?`,
-  GENERAL_GUIDANCE: `${ROLE_ASSISTANT} There seems to be some confusion. Part 1: Let's try to get back on track with your reflection. [AI_MSG_SEPARATOR] Part 2: Where were we, or what were you thinking about regarding your goals?`,
-  CLARIFY_OUTCOME: `${ROLE_ASSISTANT} User's previous response about their goal outcome was unclear. Part 1: I'd like to make sure I understand. [AI_MSG_SEPARATOR] Part 2: Just to clarify, were you able to accomplish your previous goal?`,
-  CLARIFY_WHY: `${ROLE_ASSISTANT} User's previous response about their reasons was unclear. Part 1: Thanks for sharing. To make sure I follow. [AI_MSG_SEPARATOR] Part 2: Could you tell me a bit more about why you were (or weren't) able to accomplish your goal? It's okay if you're not sure.`,
-  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT} User's previous response about their next goal or timing was unclear. Part 1: Okay, let's clarify that. [AI_MSG_SEPARATOR] Part 2: To ensure I've got it, what's your next goal, and when are you aiming to achieve it?`,
+  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT} Reflection session concluded. Briefly acknowledge the session is over and ask how else you can help them today.`,
+  GENERAL_GUIDANCE: `${ROLE_ASSISTANT} There seems to be some confusion. Let's try to get back on track with your reflection. Where were we, or what were you thinking about regarding your goals?`,
+  CLARIFY_OUTCOME: `${ROLE_ASSISTANT} User's previous response about their goal outcome was unclear. Make sure you understand by asking them to clarify if they were able to accomplish their previous goal.`,
+  CLARIFY_WHY: `${ROLE_ASSISTANT} User's previous response about their reasons was unclear. Thank them for sharing and ask them to tell you a bit more about why they were (or weren't) able to accomplish their goal. Let them know it's okay if they're not sure.`,
+  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT} User's previous response about their next goal or timing was unclear. Ask them to clarify what their next goal is, and when they are aiming to achieve it.`,
 };
 
 const STAGE_KEYS = {
@@ -482,7 +479,7 @@ function determineNextStepFromAIState(aiState) {
       aiState.nextGoalText &&
       aiState.nextGoalText !== 'not specified'
     ) {
-      instruction = `${ROLE_ASSISTANT} Part 1: Understood, the goal is "${aiState.nextGoalText}". [AI_MSG_SEPARATOR] Part 2: And when do you plan to achieve this?`;
+      instruction = `${ROLE_ASSISTANT} Understood, the goal is "${aiState.nextGoalText}". And when do you plan to achieve this?`;
     } else {
       instruction = STAGE_SYSTEM_PROMPTS.CLARIFY_NEXT_GOAL_AND_TIMING;
     }
@@ -569,8 +566,8 @@ exports.handleUserResponse = async (req, res) => {
           }
         }
       }
-      // Ensure the dynamically constructed error prompt also follows multi-part and ends with a question.
-      systemInstructionForLlm = `${baseRecoveryMessage} [AI_MSG_SEPARATOR] To help us get back on course: ${guidingQuestion}`;
+      // Ensure the dynamically constructed error prompt also follows single instruction format
+      systemInstructionForLlm = `${baseRecoveryMessage} To help us get back on course: ${guidingQuestion}`;
     }
 
     const currentUserIsUncertain = UNCERTAINTY_PHRASES.some((phrase) =>
@@ -604,10 +601,8 @@ exports.handleUserResponse = async (req, res) => {
         finalAiMessageContent = aiResponse.message.content;
       }
     }
-    const aiMessageArray = finalAiMessageContent
-      .split('[AI_MSG_SEPARATOR]')
-      .map((part) => part.trim())
-      .filter((part) => part.length > 0);
+    // Since we've removed [AI_MSG_SEPARATOR], we don't need to split the response
+    const aiMessageArray = [finalAiMessageContent.trim()].filter((part) => part.length > 0);
 
     // Determine final reported stage
     let finalReportedStage = currentStageForResponse;
