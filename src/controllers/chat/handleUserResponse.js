@@ -38,7 +38,7 @@ const STATE_ANALYSIS_SYSTEM_PROMPT = `You are a precise conversation state analy
 1.  **Outcome**: Did the user achieve their previous goal? (e.g., respond to "were you able to do it?")
 2.  **Why**: The reasons for the outcome. (e.g., respond to "Why were you able/unable...?")
 3.  **Next Goal Text**: The user's description of their goal for the next period. Extract the actual text of the goal. If the user's stated goal is short or referential (e.g., 'do it again', 'the same thing', 'go again'), try to resolve it into a more specific goal description by looking at the most recent prior goal discussed or implied in the chat history. For example, if the prior goal was 'go to the gym' and the user says 'go again', nextGoalText should be 'go to the gym again'. If resolution is not possible, use the literal phrase.
-4.  **Next Goal Timing**: When the user plans to achieve their next goal. (e.g., "tomorrow", "next week", "by Friday")
+4.  **Next Goal Timing**: When the user plans to achieve their next goal. (e.g., "tomorrow", "next week", "by Friday"). For recurring daily activities (like going to the gym), if the user references "the same thing" or similar phrases without specifying timing, you should infer timing as "tomorrow" unless context clearly suggests otherwise. If the user later specifies a different timing, use that instead.
 
 Based on the history, identify and output ONLY a single, raw, valid JSON object with the following fields:
 - \`outcomeProvided\`: boolean (true if user stated outcome after an initial question)
@@ -473,6 +473,30 @@ function determineNextStepFromAIState(aiState) {
   } else if (!nextGoalTimingProvided) {
     // Goal text IS provided (nextGoalProvided is true, so aiState.nextGoalText should be meaningful), but timing is NOT.
     let instruction;
+
+    // Check if the goal text refers to a recurring activity (like "same thing", "again", etc.)
+    const isRecurringReference =
+      aiState.nextGoalText &&
+      (aiState.nextGoalText.includes('again') ||
+        aiState.nextGoalText.includes('same') ||
+        aiState.nextGoalText.toLowerCase().includes('repeat'));
+
+    // For recurring activities, we can often infer "tomorrow" as the timing
+    if (isRecurringReference) {
+      // Skip asking for timing and go directly to conclusion
+      return {
+        systemInstructionText: STAGE_SYSTEM_PROMPTS.REQUEST_CONCLUDE,
+        currentStage: STAGE_KEYS.AWAITING_CONCLUSION,
+        collectedInfo: {
+          ...collectedInfo,
+          nextGoalTimingProvided: true, // Mark timing as provided
+          nextGoalTiming: 'tomorrow', // Infer "tomorrow" as the timing
+        },
+        lastSignificantAssistantPromptType,
+      };
+    }
+
+    // For non-recurring activities, still ask for timing
     // We check aiState.nextGoalText is not 'not specified' as an extra safeguard, though nextGoalProvided should cover this.
     if (
       lastSignificantAssistantPromptType === ASSISTANT_PROMPT_TYPES.ASKED_NEXT_GOAL &&
