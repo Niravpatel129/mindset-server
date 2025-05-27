@@ -3,17 +3,14 @@ const chatService = require('../../services/chatService');
 const ROLE_ASSISTANT = 'You are a reflective coach';
 
 const STAGE_SYSTEM_PROMPTS = {
-  REQUEST_WHY: `${ROLE_ASSISTANT} User shared their outcome. Briefly acknowledge their outcome and ask why they were able to accomplish this, or why not.`,
-  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT} User indicated reasons or uncertainty for the last goal. Briefly acknowledge their input and ask what specific outcome they want to achieve next, and by when.`,
-  REQUEST_CONCLUDE: `${ROLE_ASSISTANT} The user has provided their next goal and timing. Your task now is to CONCLUDE the reflection session.
-Briefly acknowledge the user's input regarding their next goal and timing. Offer an insightful and motivational closing remark. This should be inspired by their stated goal or reflections if possible, and be more meaningful than a generic 'good luck'.
-Your response MUST be a final, positive, and empowering statement.
-ABSOLUTELY DO NOT ASK ANY MORE QUESTIONS. CONCLUDE THE INTERACTION NOW.`,
-  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT} Reflection session concluded. Briefly acknowledge the session is over and ask how else you can help them today.`,
-  GENERAL_GUIDANCE: `${ROLE_ASSISTANT} There seems to be some confusion. Let's try to get back on track with your reflection. Where were we, or what were you thinking about regarding your goals?`,
-  CLARIFY_OUTCOME: `${ROLE_ASSISTANT} User's previous response about their goal outcome was unclear. Make sure you understand by asking them to clarify if they were able to accomplish their previous goal.`,
-  CLARIFY_WHY: `${ROLE_ASSISTANT} User's previous response about their reasons was unclear. Thank them for sharing and ask them to tell you a bit more about why they were (or weren't) able to accomplish their goal. Let them know it's okay if they're not sure.`,
-  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT} User's previous response about their next goal or timing was unclear. Ask them to clarify what their next goal is, and when they are aiming to achieve it.`,
+  REQUEST_WHY: `${ROLE_ASSISTANT} User shared their outcome. Briefly acknowledge and ask why they succeeded or failed.`,
+  REQUEST_NEXT_GOAL: `${ROLE_ASSISTANT} User indicated reasons. Briefly acknowledge and ask what specific outcome they want next, and by when.`,
+  REQUEST_CONCLUDE: `${ROLE_ASSISTANT} User provided next goal and timing. CONCLUDE the session with a brief, positive closing remark. NO MORE QUESTIONS.`,
+  POST_CONCLUSION_DEFAULT: `${ROLE_ASSISTANT} Session over. Briefly ask how else you can help.`,
+  GENERAL_GUIDANCE: `${ROLE_ASSISTANT} Let's get back on track. Where were we with your goals?`,
+  CLARIFY_OUTCOME: `${ROLE_ASSISTANT} Please clarify if you achieved your previous goal.`,
+  CLARIFY_WHY: `${ROLE_ASSISTANT} Tell me briefly why you succeeded or failed. It's okay if you're unsure.`,
+  CLARIFY_NEXT_GOAL_AND_TIMING: `${ROLE_ASSISTANT} What's your next goal and when do you plan to achieve it?`,
 };
 
 const STAGE_KEYS = {
@@ -133,7 +130,7 @@ async function getAIAnalyzedState(priorChatHistory) {
     const analysisResponse = await chatService.sendMessage(
       historyString,
       [{ role: 'system', content: STATE_ANALYSIS_SYSTEM_PROMPT }],
-      { model: 'gpt-3.5-turbo' }, // Ensure this model is optimal for structured JSON output
+      { model: 'o3' }, // Ensure this model is optimal for structured JSON output
     );
 
     let stringToParse = null;
